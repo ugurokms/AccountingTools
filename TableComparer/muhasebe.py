@@ -80,6 +80,62 @@ class FileComparer(QWidget):
 
         self.setLayout(main_layout)
 
+    def process_files(self):
+        if not self.file1 or not self.file2:
+            print("Lütfen her iki dosyayı da seçin.")
+            return
+
+        output_file = self.output_file_input.text().strip()
+        if not output_file:
+            print("Lütfen sonuç dosyası adını girin.")
+            return
+
+        if not output_file.endswith(".xlsx"):
+            output_file += ".xlsx"
+
+        # Read the Excel files
+        df1 = pd.read_excel(self.file1)
+        df2 = pd.read_excel(self.file2)
+
+        # Clean up column names and format TARİH columns
+        df1.columns = df1.columns.str.strip()
+        df2.columns = df2.columns.str.strip()
+        df1["TARİH"] = pd.to_datetime(df1["TARİH"], dayfirst=True).dt.strftime("%d/%m/%Y")
+        df2["TARİH"] = pd.to_datetime(df2["TARİH"], dayfirst=True).dt.strftime("%d/%m/%Y")
+
+        # Ensure BORÇ and ALACAK are numeric
+        df1["BORÇ"] = pd.to_numeric(df1["BORÇ"], errors='coerce').fillna(0)
+        df1["ALACAK"] = pd.to_numeric(df1["ALACAK"], errors='coerce').fillna(0)
+        df2["BORÇ"] = pd.to_numeric(df2["BORÇ"], errors='coerce').fillna(0)
+        df2["ALACAK"] = pd.to_numeric(df2["ALACAK"], errors='coerce').fillna(0)
+
+        # Merge on BORÇ and ALACAK, but keep TARİH separate
+        merged_df = pd.merge(
+            df1, df2,
+            on=["BORÇ", "ALACAK"],
+            how="inner",
+            suffixes=("_Tablo1", "_Tablo2")
+        )
+
+        # Group by BORÇ and ALACAK, and aggregate TARİH values
+        grouped_df = merged_df.groupby(["BORÇ", "ALACAK"]).agg({
+            "TARİH_Tablo1": lambda x: ", ".join(sorted(x.unique())),
+            "TARİH_Tablo2": lambda x: ", ".join(sorted(x.unique()))
+        }).reset_index()
+
+        # Rename columns for clarity
+        grouped_df.rename(columns={
+            "TARİH_Tablo1": "TARİH (Tablo 1)",
+            "TARİH_Tablo2": "TARİH (Tablo 2)"
+        }, inplace=True)
+
+        # Save the result to an Excel file
+        with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
+            grouped_df.to_excel(writer, sheet_name="Aynı Borç ve Alacak Farklı Tarihler", index=False)
+
+        print(f"Farklı kayıtlar '{output_file}' dosyasına kaydedildi.")
+        QApplication.quit()
+
     def select_file1(self):
         self.file1, _ = QFileDialog.getOpenFileName(self, "Tablo 1 dosyasını seçin", "", "Excel Files (*.xlsx *.xls)")
         if self.file1:
@@ -125,19 +181,45 @@ class FileComparer(QWidget):
             suffixes=('_df1', '_df2')
         )
 
+        # First difference: In Tablo 1 but not in Tablo 2
         diff1 = merged_df[merged_df["_merge"] == "left_only"]
         diff1_columns = ["TARİH", "BORÇ", "ALACAK"] + [col for col in merged_df.columns if col.endswith('_df1')]
         diff1 = diff1[diff1_columns]
         diff1.columns = [col.replace('_df1', '') for col in diff1.columns]
 
+        # Second difference: In Tablo 2 but not in Tablo 1
         diff2 = merged_df[merged_df["_merge"] == "right_only"]
         diff2_columns = ["TARİH", "BORÇ", "ALACAK"] + [col for col in merged_df.columns if col.endswith('_df2')]
         diff2 = diff2[diff2_columns]
         diff2.columns = [col.replace('_df2', '') for col in diff2.columns]
 
-        with pd.ExcelWriter(output_file) as writer:
+        # Third table: Same "BORÇ" and "ALACAK" but different "TARİH"
+        common_df = pd.merge(
+            df1, df2,
+            on=["BORÇ", "ALACAK"],
+            suffixes=('_Tablo1', '_Tablo2')
+        )
+        # Filter rows where "TARİH" values are different
+        diff3 = common_df[common_df["TARİH_Tablo1"] != common_df["TARİH_Tablo2"]]
+
+        # Group by "BORÇ" and "ALACAK" and aggregate the "TARİH" values
+        grouped_diff3 = diff3.groupby(["BORÇ", "ALACAK"]).agg({
+            "TARİH_Tablo1": lambda x: ", ".join(sorted(x.unique())),
+            "TARİH_Tablo2": lambda x: ", ".join(sorted(x.unique()))
+        }).reset_index()
+
+        # Rename columns for clarity
+        grouped_diff3.rename(columns={
+            "TARİH_Tablo1": "TARİH (Tablo 1)",
+            "TARİH_Tablo2": "TARİH (Tablo 2)"
+        }, inplace=True)
+
+        # Save all tables to the Excel file
+        with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
             diff1.to_excel(writer, sheet_name="Tablo 1'de Olup Tablo 2'de Yok", index=False)
             diff2.to_excel(writer, sheet_name="Tablo 2'de Olup Tablo 1'de Yok", index=False)
+            grouped_diff3.to_excel(writer, sheet_name="Ayni Borç ve Alacak Farkli Tarihler", index=False)
+
 
         print(f"Farklı kayıtlar '{output_file}' dosyasına kaydedildi.")
         QApplication.quit()
