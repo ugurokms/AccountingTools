@@ -94,8 +94,9 @@ class FileComparer(QWidget):
             output_file += ".xlsx"
 
         # Read the Excel files
-        df1 = pd.read_excel(self.file1)
-        df2 = pd.read_excel(self.file2)
+        df1 = pd.read_excel(self.file1, engine="openpyxl")
+        df2 = pd.read_excel(self.file2, engine="openpyxl")
+        
 
         # Clean up column names and format TARİH columns
         df1.columns = df1.columns.str.strip()
