@@ -1,8 +1,64 @@
 import sys
 import pandas as pd
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QPushButton, QFileDialog, QVBoxLayout, QLineEdit, QGroupBox
+from PyQt5.QtWidgets import (
+    QApplication,
+    QWidget,
+    QLabel,
+    QPushButton,
+    QFileDialog,
+    QVBoxLayout,
+    QLineEdit,
+    QGroupBox,
+)
 from PyQt5.QtGui import QFont
 from PyQt5.QtCore import Qt
+
+
+def compare_tables(df1: pd.DataFrame, df2: pd.DataFrame):
+    """Return rows only present in df1 or df2.
+
+    Parameters
+    ----------
+    df1, df2 : pandas.DataFrame
+        DataFrames to compare. They must contain the columns
+        ``TARİH``, ``BORÇ`` and ``ALACAK`` which will be used as merge keys.
+
+    Returns
+    -------
+    tuple of pandas.DataFrame
+        ``(left_only, right_only)`` where ``left_only`` contains rows that
+        appear only in ``df1`` and ``right_only`` contains rows that appear
+        only in ``df2``.
+    """
+
+    merged_df = pd.merge(
+        df1,
+        df2,
+        on=["TARİH", "BORÇ", "ALACAK"],
+        how="outer",
+        indicator=True,
+        suffixes=("_df1", "_df2"),
+    )
+
+    diff1 = merged_df[merged_df["_merge"] == "left_only"]
+    diff1_columns = [
+        "TARİH",
+        "BORÇ",
+        "ALACAK",
+    ] + [col for col in merged_df.columns if col.endswith("_df1")]
+    diff1 = diff1[diff1_columns]
+    diff1.columns = [col.replace("_df1", "") for col in diff1.columns]
+
+    diff2 = merged_df[merged_df["_merge"] == "right_only"]
+    diff2_columns = [
+        "TARİH",
+        "BORÇ",
+        "ALACAK",
+    ] + [col for col in merged_df.columns if col.endswith("_df2")]
+    diff2 = diff2[diff2_columns]
+    diff2.columns = [col.replace("_df2", "") for col in diff2.columns]
+
+    return diff1, diff2
 
 class FileComparer(QWidget):
     def __init__(self):
@@ -117,23 +173,7 @@ class FileComparer(QWidget):
         df2["BORÇ"] = df2["BORÇ"].fillna(0).map(lambda x: f"{float(x):.2f}")
         df2["ALACAK"] = df2["ALACAK"].fillna(0).map(lambda x: f"{float(x):.2f}")
 
-        merged_df = pd.merge(
-            df1, df2,
-            on=["TARİH", "BORÇ", "ALACAK"],
-            how="outer",
-            indicator=True,
-            suffixes=('_df1', '_df2')
-        )
-
-        diff1 = merged_df[merged_df["_merge"] == "left_only"]
-        diff1_columns = ["TARİH", "BORÇ", "ALACAK"] + [col for col in merged_df.columns if col.endswith('_df1')]
-        diff1 = diff1[diff1_columns]
-        diff1.columns = [col.replace('_df1', '') for col in diff1.columns]
-
-        diff2 = merged_df[merged_df["_merge"] == "right_only"]
-        diff2_columns = ["TARİH", "BORÇ", "ALACAK"] + [col for col in merged_df.columns if col.endswith('_df2')]
-        diff2 = diff2[diff2_columns]
-        diff2.columns = [col.replace('_df2', '') for col in diff2.columns]
+        diff1, diff2 = compare_tables(df1, df2)
 
         with pd.ExcelWriter(output_file) as writer:
             diff1.to_excel(writer, sheet_name="Tablo 1'de Olup Tablo 2'de Yok", index=False)
@@ -142,7 +182,9 @@ class FileComparer(QWidget):
         print(f"Farklı kayıtlar '{output_file}' dosyasına kaydedildi.")
         QApplication.quit()
 
-app = QApplication(sys.argv)
-window = FileComparer()
-window.show()
-sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = FileComparer()
+    window.show()
+    sys.exit(app.exec_())
